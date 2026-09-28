@@ -47,7 +47,23 @@ cp .env.example .env
 Put the Atlas URI and Voyage key in `.env`. Confirm `BENCHMARK_DB` is a new, dedicated database before importing.
 Quoted values are supported, which is useful when a URI contains shell-special characters.
 
-## Controlled execution
+## Use the published starter snapshot
+
+The repository includes a compressed, three-part snapshot of the completed starter corpus: 2,047 SciFact chunks, 80 labelled queries, and six generated Voyage v4 representations. Restore it before importing to avoid downloading the corpus or making new embedding API calls:
+
+```bash
+# Reassembles the three parts, verifies SHA-256, and restores data/prepared/.
+python3 scripts/restore_starter_snapshot.py
+
+# Confirms the corpus, labels, and vector dimensions before importing.
+.venv/bin/python scripts/validate_artifacts.py
+```
+
+The snapshot is fixed to the manifest's 2026-09-21 starter selection and model specifications. It does not include Atlas indexes, Atlas data, query results, credentials, or any reranking output. A Voyage API key is unnecessary unless you run client reranking or generate a fresh embedding set.
+
+## Regenerate the starter data instead
+
+Use this path only when you need a fresh corpus preparation or embeddings. It downloads the source data and the embedding command makes billable Voyage API calls.
 
 ```bash
 # Downloads and prepares 1,000 source documents and 80 labelled test queries.
@@ -55,6 +71,11 @@ Quoted values are supported, which is useful when a URI contains shell-special c
 
 # Calls Voyage once per selected representation and records usage tokens.
 .venv/bin/python scripts/embed_voyage.py
+```
+
+## Load, index, and run
+
+```bash
 
 # Validate the prepared corpus and embeddings before touching Atlas.
 .venv/bin/python scripts/validate_artifacts.py
