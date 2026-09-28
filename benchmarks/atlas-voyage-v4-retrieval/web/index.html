@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Atlas + Voyage v4 Retrieval Benchmark</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <p class="eyebrow">REPRODUCIBLE RETRIEVAL BENCHMARK</p>
+        <h1>Atlas Vector Search with Voyage v4</h1>
+        <p class="lede">A bounded experiment on real scientific claims and held-out relevance labels. It is designed to expose the quality, latency, and storage trade-offs inside the retrieval stack—not to recreate a production system or compare against Elasticsearch.</p>
+        <div class="scope"><span>1,000 source papers</span><span>80 labelled queries</span><span>2,047 chunks</span><span>Atlas M30 Gen 2 · AWS</span><span>2 × dedicated S30 Search Nodes</span><span>serial execution</span></div>
+      </header>
+
+      <section class="decision">
+        <div>
+          <p class="eyebrow">THE QUESTION</p>
+          <h2>Which representation is worth carrying forward?</h2>
+          <p>Every row uses the same public dataset, chunker, query set, top-10 document evaluation, cosine similarity, and Atlas cluster. A row changes one meaningful variable at a time.</p>
+        </div>
+        <div class="flow" aria-label="Benchmark flow">
+          <div><b>Real corpus</b><small>BEIR SciFact</small></div><i>→</i>
+          <div><b>Chunk + embed</b><small>Voyage v4 APIs</small></div><i>→</i>
+          <div><b>Atlas search</b><small>one index per representation</small></div><i>→</i>
+          <div><b>Labelled scoring</b><small>Recall, MRR, nDCG</small></div>
+        </div>
+      </section>
+
+      <section>
+        <p class="eyebrow">COMPARISON PLAN</p>
+        <h2>What changes in each set</h2>
+        <div class="cards">
+          <article><p class="tag">01 · MODEL</p><h3>Retrieval quality</h3><p><code>voyage-4-large</code>, <code>voyage-4</code>, and <code>voyage-4-lite</code> at 1024 dimensions. This isolates the general-model quality/cost/latency choice.</p></article>
+          <article><p class="tag">02 · CONTEXT</p><h3>Chunk-aware embeddings</h3><p><code>voyage-context-4</code> encodes the chunks of a paper together. It is compared with general embeddings of the same chunk text, rather than assumed to be better.</p></article>
+          <article><p class="tag">03 · DIMENSION</p><h3>Matryoshka reduction</h3><p><code>voyage-4</code> at 1024, 512, and 256 dimensions. Lower dimensions reduce vector and index footprint; the labels show whether the quality loss is acceptable.</p></article>
+          <article><p class="tag">04 · ATLAS BEHAVIOUR</p><h3>Index trade-offs</h3><p>Float versus scalar quantization, then <code>numCandidates</code> 100, 400, and 1000. ANN-to-ENN overlap is retained for the candidate-curve rows.</p></article>
+        </div>
+      </section>
+
+      <section class="metrics">
+        <div>
+          <p class="eyebrow">READING THE RESULT</p>
+          <h2>Quality first, then the cost of getting it</h2>
+          <dl>
+            <dt>Recall@10</dt><dd>Share of labelled relevant papers retrieved in the top ten documents.</dd>
+            <dt>MRR@10</dt><dd>How quickly the first relevant paper appears.</dd>
+            <dt>nDCG@10</dt><dd>Ranking quality, using the relevance labels and position.</dd>
+            <dt>P50 / P95</dt><dd>Client-observed Atlas retrieval time, one query at a time. Not a throughput claim.</dd>
+            <dt>ANN–ENN overlap</dt><dd>Approximate-search agreement with an exact reference for the candidate curve.</dd>
+          </dl>
+        </div>
+        <aside>
+          <p class="tag">BOUNDARY</p>
+          <p>This deliberately does not answer application end-to-end latency, concurrent capacity, ACL correctness, hybrid retrieval, or performance at millions of vectors. Those need a later workload-specific benchmark.</p>
+        </aside>
+      </section>
+
+      <section id="latest-results">
+        <p class="eyebrow">LATEST LOCAL RUN</p>
+        <h2>Measured results</h2>
+        <p id="run-summary" class="muted">Loading local result data…</p>
+        <div class="table-wrap metric-table"><table><thead><tr><th>Metric</th><th>How it is calculated</th><th>What it does and does not represent</th></tr></thead><tbody>
+          <tr><td>Recall@10</td><td>For each labelled query: relevant parent documents retrieved in the top 10 ÷ all labelled relevant parent documents. The page shows the mean across completed queries.</td><td>Whether relevant material was found. Chunks are deduplicated to parent documents before scoring.</td></tr>
+          <tr><td>MRR@10</td><td>For each query: reciprocal of the first relevant parent-document rank—1.0 at rank 1, 0.5 at rank 2, and so on. The page shows the mean.</td><td>Rewards getting the first useful answer near the top.</td></tr>
+          <tr><td>nDCG@10</td><td>Discounted relevance gain across all ten returned parent documents, normalized against the ideal order. The page shows the mean.</td><td>Measures overall ranking quality, not just the first relevant result.</td></tr>
+          <tr><td>Atlas retrieval P50 / P95</td><td>For each serial query, the timer starts immediately before the MongoDB aggregation call and stops after all 50 chunk results are received. P50 is the median; P95 is the 95th-percentile value across the run.</td><td>Includes Atlas Vector Search, network round trip, and driver/result retrieval. Excludes Voyage query embedding, reranking, parent-document deduplication, application logic, and user-facing generation. It is client-observed retrieval latency, not a server-only or end-to-end SLA.</td></tr>
+          <tr><td>Rerank P50</td><td>For rerank rows only: timer around the Voyage reranker API call on the retrieved candidate chunks. P50 is the median across the run.</td><td>Separate from Atlas retrieval. A dash means reranking was not selected for that row.</td></tr>
+          <tr><td>Native pipeline P50 / P95</td><td>For native-rerank rows only: timer starts immediately before one aggregation containing <code>$vectorSearch</code> followed by <code>$rerank</code>, and stops after the top 10 rows return. P50/P95 are calculated across serial queries.</td><td>Includes the whole Atlas aggregation, network round trip, and driver result retrieval. It cannot split Vector Search time from native rerank time. Native reranking uses Atlas <code>rerank-2.5-lite</code>; it is a different model from the separate Voyage client-rerank rows.</td></tr>
+          <tr><td>Total P50</td><td>For each query: Atlas retrieval time + rerank time; then calculate the median across the run.</td><td>Still excludes embedding generation and the rest of an application request path.</td></tr>
+          <tr><td>ANN–ENN overlap@10</td><td>Top-10 parent documents common to an ANN query and the corresponding exact (`exact: true`) query, divided by the exact top-10 document count.</td><td>Approximate-search agreement with an exact reference. A dash means an exact reference was intentionally not run for that variation.</td></tr>
+        </tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Focus</th><th>Dimensions</th><th>Quantization</th><th>numCandidates</th><th>Recall@10</th><th>MRR@10</th><th>nDCG@10</th><th>Atlas P50 / P95 ms</th><th>Native pipeline P50 / P95 ms</th><th>Client rerank P50 ms</th><th>Total P50 ms</th><th>ANN–ENN</th></tr></thead><tbody id="results-body"></tbody></table></div>
+      </section>
+
+      <section id="version-comparison">
+        <p class="eyebrow">OBSERVED CHANGE FROM PRIOR RUN</p>
+        <h2>Same-profile deltas</h2>
+        <p class="muted">Current value minus the immediately preceding artefact for the same profile and variant. These are observed differences, not proof that MongoDB 9.0.2 caused them: this is one serial run without warm-up or repeated-trial controls.</p>
+        <div class="table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Prior run</th><th>Δ Recall@10</th><th>Δ MRR@10</th><th>Δ nDCG@10</th><th>Δ observed P50 ms</th></tr></thead><tbody id="comparison-body"></tbody></table></div>
+      </section>
+
+      <section id="index-evidence">
+        <p class="eyebrow">VECTOR SEARCH INDEX SNAPSHOT</p>
+        <h2>Index configuration and observed footprint</h2>
+        <p id="index-summary" class="muted">Loading index snapshot…</p>
+        <div class="table-wrap"><table><thead><tr><th>Index</th><th>Status</th><th>Vector field</th><th>Dimensions</th><th>Quantization</th><th>Atlas UI Total Size</th><th>Atlas UI Recommended Memory</th><th>Nominal float32 payload</th></tr></thead><tbody id="index-body"></tbody></table></div>
+        <p id="index-note" class="muted"></p>
+      </section>
+
+      <footer>Dataset: BEIR SciFact · Model references: Voyage AI documentation · Results are local, reproducible run artifacts.</footer>
+    </main>
+    <script src="results.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

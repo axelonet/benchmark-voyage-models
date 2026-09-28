@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+data/source/
+data/prepared/
+results/*.json
+!results/.gitkeep
+web/results.json
+web/results.js

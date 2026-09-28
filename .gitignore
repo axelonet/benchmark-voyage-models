@@ -1,0 +1,20 @@
+# Credentials and local settings
+.env
+.env.*
+!.env.example
+
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+
+# Downloaded benchmark data and generated results
+**/data/source/
+**/data/prepared/
+**/results/*.json
+!**/results/.gitkeep
+**/web/results.json
+**/web/results.js
+
+# Operating-system metadata
+.DS_Store
