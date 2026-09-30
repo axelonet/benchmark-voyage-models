@@ -65,3 +65,21 @@ async function render() {
   }
 }
 render();
+
+function setupExpandToggle() {
+  const button = document.querySelector("#expand-results");
+  const wrap = document.querySelector("#results-table-wrap");
+  if (!button || !wrap) return;
+  const setExpanded = (expanded) => {
+    wrap.classList.toggle("expanded", expanded);
+    button.classList.toggle("is-expanded", expanded);
+    button.textContent = expanded ? "✕ Close" : "⤢ Expand";
+    button.setAttribute("aria-expanded", String(expanded));
+    document.body.classList.toggle("results-expanded", expanded);
+  };
+  button.addEventListener("click", () => setExpanded(!wrap.classList.contains("expanded")));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && wrap.classList.contains("expanded")) setExpanded(false);
+  });
+}
+setupExpandToggle();

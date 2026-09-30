@@ -9,3 +9,4 @@ results/*.json
 web/results.json
 web/results.js
 web/results-*.json
+.claude/

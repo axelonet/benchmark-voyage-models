@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.claude/
 
 # Python environments and caches
 .venv/
