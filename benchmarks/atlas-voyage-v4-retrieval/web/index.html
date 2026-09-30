@@ -78,6 +78,21 @@
         <div class="table-wrap" id="results-table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Model</th><th>Focus</th><th>Dimensions</th><th>Quantization</th><th>numCandidates</th><th>Top K</th><th>numDocsToRerank</th><th>Recall@10</th><th>MRR@10</th><th>nDCG@10</th><th>Hit@5</th><th>Hit@1</th><th>Precision@10</th><th>Atlas P50 / P95 ms</th><th>Native pipeline P50 / P95 ms</th><th>Client rerank P50 ms</th><th>Total P50 ms</th><th>ANN–ENN</th></tr></thead><tbody id="results-body"></tbody></table></div>
       </section>
 
+      <section id="hybrid-results">
+        <p class="eyebrow">NATIVE HYBRID SEARCH</p>
+        <h2><code>$rankFusion</code> — vector + BM25</h2>
+        <p id="hybrid-summary" class="muted">Loading hybrid-search results…</p>
+        <p class="muted">Timer starts immediately before one aggregation containing native <code>$rankFusion</code> (a <code>$vectorSearch</code> pipeline combined with a <code>$search</code> BM25 pipeline) and stops after the top 10 rows return; it cannot split the vector component from the BM25 component. Every row also applies the ACL pre-filter — see Permission isolation below for what that filter is validated against.</p>
+        <div class="table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Model</th><th>Vector weight</th><th>Text weight</th><th>Recall@10</th><th>MRR@10</th><th>nDCG@10</th><th>Hit@5</th><th>Hit@1</th><th>Precision@10</th><th>Hybrid pipeline P50 / P95 ms</th></tr></thead><tbody id="hybrid-body"></tbody></table></div>
+      </section>
+
+      <section id="permission-isolation">
+        <p class="eyebrow">ACL PRE-FILTER</p>
+        <h2>Permission isolation</h2>
+        <p id="isolation-summary" class="muted">Loading permission-isolation results…</p>
+        <div class="table-wrap"><table><thead><tr><th>Query</th><th>Queried as</th><th>Leaked parent documents</th></tr></thead><tbody id="isolation-body"></tbody></table></div>
+      </section>
+
       <section id="version-comparison">
         <p class="eyebrow">OBSERVED CHANGE FROM PRIOR RUN</p>
         <h2>Same-profile deltas</h2>

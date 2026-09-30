@@ -91,6 +91,54 @@ def native_rerank_pipeline(variant: dict[str, Any], query: dict[str, Any]) -> li
     ]
 
 
+def hybrid_pipeline(variant: dict[str, Any], query: dict[str, Any]) -> list[dict[str, Any]]:
+    """Native $rankFusion combining one $vectorSearch pipeline and one BM25 $search pipeline.
+
+    The ACL filter here uses acl_tenant_id, a value every chunk carries regardless of its
+    synthetic permission group, so this pipeline's accuracy numbers are unaffected by the
+    filter. Group-level isolation is verified separately by
+    scripts/test_permission_isolation.py, which filters by a specific group instead.
+    """
+    principal = variant["acl_tenant_id"]
+    return [
+        {
+            "$rankFusion": {
+                "input": {
+                    "pipelines": {
+                        "vector": [
+                            {
+                                "$vectorSearch": {
+                                    "index": variant["index"],
+                                    "path": variant["vector_field"],
+                                    "queryVector": query["query_vectors"][variant["query_key"]],
+                                    "numCandidates": variant["num_candidates"],
+                                    "limit": variant["fetch_k"],
+                                    "filter": {"effective_principal_ids": principal},
+                                }
+                            }
+                        ],
+                        "text": [
+                            {
+                                "$search": {
+                                    "index": variant["text_index"],
+                                    "compound": {
+                                        "must": [{"text": {"query": query["query_text"], "path": "text"}}],
+                                        "filter": [{"equals": {"path": "effective_principal_ids", "value": principal}}],
+                                    },
+                                }
+                            },
+                            {"$limit": variant["fetch_k"]},
+                        ],
+                    }
+                },
+                "combination": {"weights": variant["hybrid_weights"]},
+            }
+        },
+        {"$limit": 10},
+        {"$project": {"_id": 0, "chunk_id": 1, "parent_doc_id": 1, "text": 1, "score": {"$meta": "score"}}},
+    ]
+
+
 def invoke(collection: Any, pipeline: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], float]:
     started = time.perf_counter()
     records = list(collection.aggregate(pipeline))
@@ -144,7 +192,7 @@ def rerank(query_text: str, rows: list[dict[str, Any]]) -> tuple[list[dict[str, 
 def select_variants(profile: str) -> tuple[list[dict[str, Any]], str]:
     if profile == "smoke":
         return [variant for variant in VARIANTS if variant["name"] in {"voyage-4-1024", "voyage-context-4-1024", "voyage-4-1024-scalar"}], "standard"
-    rerank_only_families = {"rerank_depth", "dimension:matryoshka+rerank", "quantization+rerank"}
+    rerank_only_families = {"rerank_depth", "dimension:matryoshka+rerank", "quantization+rerank", "hybrid"}
     if profile == "standard":
         return [variant for variant in VARIANTS if variant["family"] not in rerank_only_families], "standard"
     rerank_variant_names = {
@@ -157,6 +205,8 @@ def select_variants(profile: str) -> tuple[list[dict[str, Any]], str]:
         return [variant for variant in VARIANTS if variant["name"] in rerank_variant_names], "client-rerank"
     if profile == "native-rerank":
         return [variant for variant in VARIANTS if variant["name"] in rerank_variant_names], "native-rerank"
+    if profile == "hybrid":
+        return [variant for variant in VARIANTS if variant["family"] == "hybrid"], "hybrid"
     raise ValueError(profile)
 
 
@@ -166,6 +216,9 @@ def run_variant(collection: Any, variant: dict[str, Any], queries: list[dict[str
         try:
             if mode == "native-rerank":
                 final_rows, pipeline_ms = invoke(collection, native_rerank_pipeline(variant, query))
+                rows, retrieval_ms, rerank_ms, total_ms = final_rows, None, None, pipeline_ms
+            elif mode == "hybrid":
+                final_rows, pipeline_ms = invoke(collection, hybrid_pipeline(variant, query))
                 rows, retrieval_ms, rerank_ms, total_ms = final_rows, None, None, pipeline_ms
             else:
                 rows, retrieval_ms = invoke(collection, retrieval_pipeline(variant, query))
@@ -197,7 +250,7 @@ def run_variant(collection: Any, variant: dict[str, Any], queries: list[dict[str
                     "ann_enn_overlap_at_10": enn_overlap,
                     "retrieval_ms": retrieval_ms,
                     "rerank_ms": rerank_ms,
-                    "pipeline_ms": pipeline_ms if mode == "native-rerank" else None,
+                    "pipeline_ms": pipeline_ms if mode in ("native-rerank", "hybrid") else None,
                     "total_ms": total_ms,
                 }
             )
@@ -219,11 +272,13 @@ def run_variant(collection: Any, variant: dict[str, Any], queries: list[dict[str
             "hit_at_1": round(statistics.mean(record["metrics"]["hit_at_1"] for record in complete), 4),
             "precision_at_10": round(statistics.mean(record["metrics"]["precision_at_10"] for record in complete), 4),
             "ann_enn_overlap_at_10": round(statistics.mean(record["ann_enn_overlap_at_10"] for record in complete if record["ann_enn_overlap_at_10"] is not None), 4) if any(record["ann_enn_overlap_at_10"] is not None for record in complete) else None,
-            "retrieval_p50_ms": round(percentile([record["retrieval_ms"] for record in complete if record["retrieval_ms"] is not None], 0.5), 3) if mode != "native-rerank" else None,
-            "retrieval_p95_ms": round(percentile([record["retrieval_ms"] for record in complete if record["retrieval_ms"] is not None], 0.95), 3) if mode != "native-rerank" else None,
+            "retrieval_p50_ms": round(percentile([record["retrieval_ms"] for record in complete if record["retrieval_ms"] is not None], 0.5), 3) if mode not in ("native-rerank", "hybrid") else None,
+            "retrieval_p95_ms": round(percentile([record["retrieval_ms"] for record in complete if record["retrieval_ms"] is not None], 0.95), 3) if mode not in ("native-rerank", "hybrid") else None,
             "rerank_p50_ms": round(percentile([record["rerank_ms"] for record in complete if record["rerank_ms"] is not None], 0.5), 3) if mode == "client-rerank" else None,
             "native_pipeline_p50_ms": round(percentile([record["pipeline_ms"] for record in complete if record["pipeline_ms"] is not None], 0.5), 3) if mode == "native-rerank" else None,
             "native_pipeline_p95_ms": round(percentile([record["pipeline_ms"] for record in complete if record["pipeline_ms"] is not None], 0.95), 3) if mode == "native-rerank" else None,
+            "hybrid_pipeline_p50_ms": round(percentile([record["pipeline_ms"] for record in complete if record["pipeline_ms"] is not None], 0.5), 3) if mode == "hybrid" else None,
+            "hybrid_pipeline_p95_ms": round(percentile([record["pipeline_ms"] for record in complete if record["pipeline_ms"] is not None], 0.95), 3) if mode == "hybrid" else None,
             "total_p50_ms": round(percentile([record["total_ms"] for record in complete], 0.5), 3),
             "total_p95_ms": round(percentile([record["total_ms"] for record in complete], 0.95), 3),
         },
@@ -231,6 +286,7 @@ def run_variant(collection: Any, variant: dict[str, Any], queries: list[dict[str
             "standard": "one client timer around $vectorSearch aggregation",
             "client-rerank": "separate client timers around $vectorSearch aggregation and Voyage rerank API call",
             "native-rerank": "one client timer around $vectorSearch + $rerank aggregation; the two server-side components are not separable from this client observation",
+            "hybrid": "one client timer around the $rankFusion aggregation combining a $vectorSearch pipeline and a $search (BM25) pipeline; the two component times are not separable from this client observation",
         }[mode],
         "records": records,
     }
@@ -238,7 +294,7 @@ def run_variant(collection: Any, variant: dict[str, Any], queries: list[dict[str
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", choices=("smoke", "standard", "rerank", "native-rerank"), default="smoke")
+    parser.add_argument("--profile", choices=("smoke", "standard", "rerank", "native-rerank", "hybrid"), default="smoke")
     parser.add_argument("--max-queries", type=int, help="lower the profile query count for a diagnostic run")
     args = parser.parse_args()
     load_dotenv()

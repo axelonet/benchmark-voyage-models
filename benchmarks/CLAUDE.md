@@ -31,7 +31,7 @@ If a second benchmark is added under `benchmarks/`, it should follow the same sp
         │   ├── prepared/    (gitignored — generated chunks/embeddings)
         │   └── snapshots/   (checked in — starter embedding tar parts)
         ├── results/         (gitignored except .gitkeep — generated run artifacts)
-        ├── scripts/         (9 standalone Python scripts)
+        ├── scripts/         (11 standalone Python scripts)
         └── web/             (static results dashboard)
 ```
 
@@ -54,7 +54,7 @@ Follow the existing style exactly when adding or editing scripts:
 
 ## 4. Explicit anti-patterns — don't do these
 
-- **Don't add a sixth copy of `load_dotenv()`.** It's already duplicated near-identically across five scripts (`collect_atlas_admin_metrics.py`, `collect_index_snapshot.py`, `create_indexes.py`, `embed_voyage.py`, `run_benchmark.py`), and the copies have already drifted (some guard for a missing `.env` file, some don't). If you touch env-loading logic, fix every copy consistently in the same change and call out the duplication to the human reviewer — don't unilaterally introduce a shared module as a side effect of an unrelated change.
+- **Don't add another copy of `load_dotenv()`.** It's already duplicated near-identically across seven scripts (`collect_atlas_admin_metrics.py`, `collect_index_snapshot.py`, `create_indexes.py`, `embed_voyage.py`, `run_benchmark.py`, `backfill_acl_fields.py`, `test_permission_isolation.py`), and the copies have already drifted (some guard for a missing `.env` file, some don't). If you touch env-loading logic, fix every copy consistently in the same change and call out the duplication to the human reviewer — don't unilaterally introduce a shared module as a side effect of an unrelated change.
 - **Don't introduce a shared `lib/`/common package casually.** The flat, standalone-script layout is an intentional (if debatable) existing pattern. Changing it is an architecture decision that needs sign-off, not a drive-by refactor bundled into another change.
 - **Don't add a test framework speculatively.** There is none today — see §7 for what "verified" means in this repo.
 - **Don't add CI, linter, or formatter config unless asked.** None of that exists currently by choice/omission; don't assume it should.

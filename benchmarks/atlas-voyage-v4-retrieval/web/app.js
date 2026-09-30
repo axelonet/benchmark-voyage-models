@@ -24,6 +24,23 @@ async function render() {
       row.innerHTML = `<td title="${variant.timing_scope || ""}">${failed ? `⚠ ${variant.status}` : (variant.run_profile || "—")}</td><td><code>${variant.name || "—"}</code></td><td>${variant.model || "—"}</td><td>${variant.family || "—"}</td><td>${variant.dimensions || "—"}</td><td>${variant.quantization || "—"}</td><td>${variant.num_candidates || "—"}</td><td>${variant.fetch_k ?? "—"}</td><td>${variant.num_docs_to_rerank ?? "—"}</td><td>${fmt(m.recall_at_10)}</td><td>${fmt(m.mrr_at_10)}</td><td>${fmt(m.ndcg_at_10)}</td><td>${fmt(m.hit_at_5)}</td><td>${fmt(m.hit_at_1)}</td><td>${fmt(m.precision_at_10)}</td><td>${fmt(m.retrieval_p50_ms, 1)} / ${fmt(m.retrieval_p95_ms, 1)}</td><td>${fmt(m.native_pipeline_p50_ms, 1)} / ${fmt(m.native_pipeline_p95_ms, 1)}</td><td>${fmt(m.rerank_p50_ms, 1)}</td><td>${fmt(m.total_p50_ms, 1)}</td><td>${fmt(m.ann_enn_overlap_at_10)}</td>`;
       body.append(row);
     }
+    const hybridSummary = document.querySelector("#hybrid-summary");
+    const hybridBody = document.querySelector("#hybrid-body");
+    const hybridVariants = data.hybrid_variants || [];
+    if (!hybridVariants.length) {
+      hybridSummary.textContent = "No hybrid ($rankFusion) run has been published yet.";
+    } else {
+      hybridSummary.textContent = `${hybridVariants.length} weight combination${hybridVariants.length === 1 ? "" : "s"} · latest artifact ${new Date(hybridVariants[0].run_at).toLocaleString()}`;
+      for (const variant of hybridVariants) {
+        const m = variant.metrics || {};
+        const weights = variant.hybrid_weights || {};
+        const row = document.createElement("tr");
+        const failed = variant.status && variant.status !== "complete";
+        if (failed) row.title = `status: ${variant.status}`;
+        row.innerHTML = `<td title="${variant.timing_scope || ""}">${failed ? `⚠ ${variant.status}` : (variant.run_profile || "—")}</td><td><code>${variant.name || "—"}</code></td><td>${variant.model || "—"}</td><td>${weights.vector ?? "—"}</td><td>${weights.text ?? "—"}</td><td>${fmt(m.recall_at_10)}</td><td>${fmt(m.mrr_at_10)}</td><td>${fmt(m.ndcg_at_10)}</td><td>${fmt(m.hit_at_5)}</td><td>${fmt(m.hit_at_1)}</td><td>${fmt(m.precision_at_10)}</td><td>${fmt(m.hybrid_pipeline_p50_ms, 1)} / ${fmt(m.hybrid_pipeline_p95_ms, 1)}</td>`;
+        hybridBody.append(row);
+      }
+    }
     const comparisonBody = document.querySelector("#comparison-body");
     const comparisons = data.variants.filter((variant) => variant.previous_metrics);
     if (!comparisons.length) {
@@ -59,6 +76,24 @@ async function render() {
       const admin = data.atlas_admin_metrics;
       const adminMessage = admin ? ` Atlas Admin API captured ${new Date(admin.captured_at).toLocaleString()}: ${Object.values(admin.metric_data_point_count || {}).reduce((total, count) => total + count, 0)} per-index size datapoints emitted. ${admin.interpretation}` : "";
       indexNote.textContent = `${snapshot.nominal_float32_payload_note} ${snapshot.search_node_index_bytes_note}${adminMessage}`;
+    }
+    const isolation = data.permission_isolation;
+    const isolationSummary = document.querySelector("#isolation-summary");
+    const isolationBody = document.querySelector("#isolation-body");
+    if (!isolation) {
+      isolationSummary.textContent = "No permission-isolation run has been published yet.";
+    } else {
+      const statusLabel = isolation.status === "pass" ? "PASS — zero cross-group leakage" : "FAIL — cross-group leakage detected";
+      isolationSummary.textContent = `${statusLabel} · ${isolation.query_count} queries checked in both directions · captured ${new Date(isolation.run_at).toLocaleString()}`;
+      if (!isolation.violations.length) {
+        isolationBody.innerHTML = '<tr><td colspan="3">No violations recorded.</td></tr>';
+      } else {
+        for (const violation of isolation.violations) {
+          const row = document.createElement("tr");
+          row.innerHTML = `<td>${violation.query_id}</td><td><code>${violation.queried_as}</code></td><td>${(violation.leaked_parent_doc_ids || []).join(", ")}</td>`;
+          isolationBody.append(row);
+        }
+      }
     }
   } catch (error) {
     summary.textContent = `Could not load local results: ${error.message}`;

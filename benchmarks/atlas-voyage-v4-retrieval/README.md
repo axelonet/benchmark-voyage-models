@@ -38,6 +38,7 @@ The completed starter run used an Atlas **M30 Gen 2** cluster on **AWS**, with *
 | Reranking-depth curve | the reranked candidates above at `numDocsToRerank=50/10/20` | applied within both the client and native pipeline reranking rows |
 | Matryoshka + reranking | `voyage-4` at 512d, reranked (`numDocsToRerank=50`) | isolates whether a truncated embedding still reranks well, through both client and native pipeline reranking |
 | Scalar quantization + reranking | `voyage-4` 1024d scalar-quantized index, reranked (`numDocsToRerank=50`) | isolates whether a quantized index still reranks well, through both client and native pipeline reranking |
+| Native hybrid search (`$rankFusion`) | `voyage-4` 1024d vector search combined with a BM25 `$search` index, at weights 60/40 and 40/60 | one aggregation timer; both weighted combinations always apply the ACL pre-filter described below |
 
 `voyage-context-4` is contextualized over chunks belonging to the same SciFact source document. It is the current Voyage contextualized-chunk model. The other rows embed the same chunk text with the general embedding API. This is an implementation comparison, not a claim that one corpus predicts every workload.
 
@@ -91,7 +92,7 @@ set -a; . ./.env; set +a
 mongoimport --uri "$MONGODB_URI" --db "$BENCHMARK_DB" --collection "$BENCHMARK_COLLECTION" \
   --file data/prepared/chunks.ndjson --type json --drop
 
-# Create seven search indexes and wait for readiness.
+# Create nine search indexes and wait for readiness.
 .venv/bin/python scripts/create_indexes.py --wait
 
 # 13 retrieval rows × 80 held-out queries, serially.
@@ -103,6 +104,20 @@ mongoimport --uri "$MONGODB_URI" --db "$BENCHMARK_DB" --collection "$BENCHMARK_C
 # 8 matching Atlas-native rerank rows. Requires Native Reranking enabled in
 # Atlas Project Settings and MongoDB 8.3+; this benchmark recorded 9.0.2.
 .venv/bin/python scripts/run_benchmark.py --profile native-rerank
+
+# Backfill synthetic tenant_id / effective_principal_ids ACL fields onto every
+# chunk. One-time step; required before the hybrid profile or the permission
+# isolation test below.
+.venv/bin/python scripts/backfill_acl_fields.py
+
+# 2 native hybrid ($rankFusion) rows — vector search combined with BM25 text
+# search, always pre-filtered by the ACL fields above. Requires $rankFusion
+# support (MongoDB 8.1+).
+.venv/bin/python scripts/run_benchmark.py --profile hybrid
+
+# Pass/fail check: queries as two synthetic permission groups and asserts
+# zero cross-group document leakage under the ACL pre-filter.
+.venv/bin/python scripts/test_permission_isolation.py
 
 .venv/bin/python scripts/build_dashboard_data.py
 python3 -m http.server --directory web 8000
@@ -122,11 +137,17 @@ Re-run embedding, validation, import, index creation, and the benchmark after ch
 Each run retains query-level rankings and these aggregate values:
 
 - Recall@10, MRR@10, nDCG@10, Hit@10, Hit@5, Hit@1, and Precision@10 against the SciFact relevance labels
-- Atlas client-observed retrieval P50/P95, separately timed Voyage client-rerank P50, and native `$vectorSearch + $rerank` pipeline P50/P95 when selected
+- Atlas client-observed retrieval P50/P95, separately timed Voyage client-rerank P50, native `$vectorSearch + $rerank` pipeline P50/P95, and native `$rankFusion` hybrid pipeline P50/P95, each when selected
 - ANN-to-ENN overlap for the candidate-curve and fetch-depth rows
 - run configuration: model, dimensions, index, scalar quantization, fetch size, `numCandidates`, `numDocsToRerank` (reranking rows only), query count, timestamps, source checksum, and embedding API token usage
 
-The timing is client-observed one-user query latency from the benchmark process. The native rerank timer covers the entire aggregation request and does not split Vector Search from reranking. It is not a capacity, concurrency, or end-to-end application-latency claim.
+The timing is client-observed one-user query latency from the benchmark process. The native rerank and hybrid timers each cover one entire aggregation request and do not split it into its component stages. None of this is a capacity, concurrency, or end-to-end application-latency claim.
+
+## Permission isolation and hybrid search
+
+`scripts/backfill_acl_fields.py` adds two fields to every chunk — `tenant_id` and `effective_principal_ids` — needed by the `hybrid` profile and by `scripts/test_permission_isolation.py`. SciFact has no real permission structure, so the two groups (`group:a`, `group:b`) are assigned synthetically, deterministically, by hashing each chunk's `parent_doc_id`. This validates the ACL pre-filter *mechanism* — that a `$vectorSearch`/`$search` filter on `effective_principal_ids` correctly excludes the other group's documents — not real-world ACL fidelity against any actual permission model.
+
+The `hybrid` profile's own accuracy numbers are filtered by `tenant_id` (a value every chunk shares), not by a specific group, so the synthetic ACL assignment does not affect its Recall/MRR/nDCG. Group-level isolation is checked exclusively by `test_permission_isolation.py`, which queries as each synthetic group in turn and fails if either group ever receives a document belonging to the other.
 
 ## Vector Search index evidence
 
