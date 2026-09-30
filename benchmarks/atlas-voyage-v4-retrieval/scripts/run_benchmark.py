@@ -82,7 +82,7 @@ def native_rerank_pipeline(variant: dict[str, Any], query: dict[str, Any]) -> li
                 "model": os.getenv("ATLAS_RERANK_MODEL", "rerank-2.5-lite"),
                 "query": {"text": query["query_text"]},
                 "path": "text",
-                "numDocsToRerank": variant["fetch_k"],
+                "numDocsToRerank": variant.get("rerank_k", variant["fetch_k"]),
             }
         },
         {"$set": {"rerank_score": {"$meta": "score"}}},
@@ -118,7 +118,10 @@ def metrics(relevance: dict[str, int], rows: list[dict[str, Any]], limit: int = 
     ideal_dcg = sum(((2**grade - 1) / math.log2(position + 1)) for position, grade in enumerate(ideal_grades, start=1))
     return {
         "hit_at_10": bool(relevant_returned),
+        "hit_at_5": bool(set(returned[:5]) & set(relevant)),
+        "hit_at_1": bool(set(returned[:1]) & set(relevant)),
         "recall_at_10": len(set(relevant_returned)) / max(len(relevant), 1),
+        "precision_at_10": len(set(relevant_returned)) / limit,
         "mrr_at_10": reciprocal_rank,
         "ndcg_at_10": dcg / ideal_dcg if ideal_dcg else 0.0,
     }
@@ -141,12 +144,19 @@ def rerank(query_text: str, rows: list[dict[str, Any]]) -> tuple[list[dict[str, 
 def select_variants(profile: str) -> tuple[list[dict[str, Any]], str]:
     if profile == "smoke":
         return [variant for variant in VARIANTS if variant["name"] in {"voyage-4-1024", "voyage-context-4-1024", "voyage-4-1024-scalar"}], "standard"
+    rerank_only_families = {"rerank_depth", "dimension:matryoshka+rerank", "quantization+rerank"}
     if profile == "standard":
-        return VARIANTS, "standard"
+        return [variant for variant in VARIANTS if variant["family"] not in rerank_only_families], "standard"
+    rerank_variant_names = {
+        "voyage-4-1024-rerank50", "voyage-4-1024-rerank10", "voyage-4-1024-rerank20",
+        "voyage-4-1024-fk10", "voyage-4-1024-fk20",
+        "voyage-context-4-1024",
+        "voyage-4-512-rerank", "voyage-4-1024-scalar-rerank",
+    }
     if profile == "rerank":
-        return [variant for variant in VARIANTS if variant["name"] in {"voyage-4-1024-nc400", "voyage-context-4-1024"}], "client-rerank"
+        return [variant for variant in VARIANTS if variant["name"] in rerank_variant_names], "client-rerank"
     if profile == "native-rerank":
-        return [variant for variant in VARIANTS if variant["name"] in {"voyage-4-1024-nc400", "voyage-context-4-1024"}], "native-rerank"
+        return [variant for variant in VARIANTS if variant["name"] in rerank_variant_names], "native-rerank"
     raise ValueError(profile)
 
 
@@ -161,7 +171,7 @@ def run_variant(collection: Any, variant: dict[str, Any], queries: list[dict[str
                 rows, retrieval_ms = invoke(collection, retrieval_pipeline(variant, query))
                 final_rows, rerank_ms = rows, None
                 if mode == "client-rerank":
-                    final_rows, rerank_ms = rerank(query["query_text"], rows)
+                    final_rows, rerank_ms = rerank(query["query_text"], rows[: variant.get("rerank_k", len(rows))])
                 total_ms = round(retrieval_ms + (rerank_ms or 0), 3)
             result = metrics(query["relevance"], final_rows)
             enn_overlap = None
@@ -181,7 +191,7 @@ def run_variant(collection: Any, variant: dict[str, Any], queries: list[dict[str
                             "vector_search_score": row.get("vector_search_score"),
                             "rerank_score": row.get("rerank_score"),
                         }
-                        for row in dedupe_documents(rows)
+                        for row in dedupe_documents(final_rows)
                     ],
                     "metrics": result,
                     "ann_enn_overlap_at_10": enn_overlap,
@@ -205,6 +215,9 @@ def run_variant(collection: Any, variant: dict[str, Any], queries: list[dict[str
             "mrr_at_10": round(statistics.mean(record["metrics"]["mrr_at_10"] for record in complete), 4),
             "ndcg_at_10": round(statistics.mean(record["metrics"]["ndcg_at_10"] for record in complete), 4),
             "hit_at_10": round(statistics.mean(record["metrics"]["hit_at_10"] for record in complete), 4),
+            "hit_at_5": round(statistics.mean(record["metrics"]["hit_at_5"] for record in complete), 4),
+            "hit_at_1": round(statistics.mean(record["metrics"]["hit_at_1"] for record in complete), 4),
+            "precision_at_10": round(statistics.mean(record["metrics"]["precision_at_10"] for record in complete), 4),
             "ann_enn_overlap_at_10": round(statistics.mean(record["ann_enn_overlap_at_10"] for record in complete if record["ann_enn_overlap_at_10"] is not None), 4) if any(record["ann_enn_overlap_at_10"] is not None for record in complete) else None,
             "retrieval_p50_ms": round(percentile([record["retrieval_ms"] for record in complete if record["retrieval_ms"] is not None], 0.5), 3) if mode != "native-rerank" else None,
             "retrieval_p95_ms": round(percentile([record["retrieval_ms"] for record in complete if record["retrieval_ms"] is not None], 0.95), 3) if mode != "native-rerank" else None,
@@ -254,6 +267,13 @@ def main() -> None:
         "query_count": len(queries),
         "variants": [],
     }
+    if variants and queries:
+        warm_up_pipeline = retrieval_pipeline(variants[0], queries[0])
+        try:
+            invoke(collection, warm_up_pipeline)
+            print("Warm-up query completed (not included in recorded metrics).")
+        except Exception as error:
+            print(f"Warm-up query failed, continuing without it: {error}")
     for variant in variants:
         print(f"Running {variant['name']} against {len(queries)} labelled queries")
         output["variants"].append(run_variant(collection, variant, queries, mode))

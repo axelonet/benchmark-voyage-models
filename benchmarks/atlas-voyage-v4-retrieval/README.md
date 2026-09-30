@@ -14,9 +14,11 @@ The benchmark answers narrowly useful questions:
 
 The default **starter** dataset has 1,000 real source documents and 80 labelled test queries. It includes every positive document for those queries plus deterministic distractors. Source documents are chunked into short word-window passages, so the imported chunk count can be modestly higher than 1,000.
 
-The default matrix has ten retrieval rows and runs serially. It records 80 query results per row. Embedding calls are batched, their API-reported token counts are written to the manifest, and no reranking request is made unless explicitly requested. The **full** dataset is 5,183 documents / 300 test queries and must be selected explicitly.
+The default matrix has 13 retrieval rows and runs serially. It records 80 query results per row. Embedding calls are batched, their API-reported token counts are written to the manifest, and no reranking request is made unless explicitly requested. The **full** dataset is 5,183 documents / 300 test queries and must be selected explicitly.
 
 Use a dedicated Atlas database. `mongoimport --drop` below deletes only the configured benchmark collection.
+
+See [`benchmarks/CLAUDE.md`](../CLAUDE.md) for the coding conventions and verification checklist that apply when modifying this benchmark's scripts.
 
 ## Measured environment
 
@@ -30,8 +32,12 @@ The completed starter run used an Atlas **M30 Gen 2** cluster on **AWS**, with *
 | Matryoshka dimensions | `voyage-4` at 1024d, 512d, 256d | same retrieval conditions |
 | Atlas scalar quantization | `voyage-4` 1024d float vs scalar-quantized index | same vectors and retrieval conditions |
 | Candidate curve | `voyage-4` 1024d at `numCandidates=100/400/1000` | same index, fetch, and evaluation |
+| Fetch-depth (Top K) curve | `voyage-4` 1024d at `fetch_k=10/20/50` | same index and `numCandidates`; ANN-to-ENN overlap retained |
 | Client reranking | selected `voyage-4` 1024d candidates through Voyage `rerank-3-lite` | separately timed from retrieval |
 | Native pipeline reranking | selected candidates through Atlas `$vectorSearch → $rerank` using `rerank-2.5-lite` | one aggregation timer; component times cannot be separated |
+| Reranking-depth curve | the reranked candidates above at `numDocsToRerank=50/10/20` | applied within both the client and native pipeline reranking rows |
+| Matryoshka + reranking | `voyage-4` at 512d, reranked (`numDocsToRerank=50`) | isolates whether a truncated embedding still reranks well, through both client and native pipeline reranking |
+| Scalar quantization + reranking | `voyage-4` 1024d scalar-quantized index, reranked (`numDocsToRerank=50`) | isolates whether a quantized index still reranks well, through both client and native pipeline reranking |
 
 `voyage-context-4` is contextualized over chunks belonging to the same SciFact source document. It is the current Voyage contextualized-chunk model. The other rows embed the same chunk text with the general embedding API. This is an implementation comparison, not a claim that one corpus predicts every workload.
 
@@ -88,13 +94,13 @@ mongoimport --uri "$MONGODB_URI" --db "$BENCHMARK_DB" --collection "$BENCHMARK_C
 # Create seven search indexes and wait for readiness.
 .venv/bin/python scripts/create_indexes.py --wait
 
-# Ten retrieval rows × 80 held-out queries, serially.
+# 13 retrieval rows × 80 held-out queries, serially.
 .venv/bin/python scripts/run_benchmark.py --profile standard
 
-# Optional: two reranking rows. This creates additional Voyage API calls.
+# Optional: 8 reranking rows. This creates additional Voyage API calls.
 .venv/bin/python scripts/run_benchmark.py --profile rerank
 
-# Two matching Atlas-native rerank rows. Requires Native Reranking enabled in
+# 8 matching Atlas-native rerank rows. Requires Native Reranking enabled in
 # Atlas Project Settings and MongoDB 8.3+; this benchmark recorded 9.0.2.
 .venv/bin/python scripts/run_benchmark.py --profile native-rerank
 
@@ -115,10 +121,10 @@ Re-run embedding, validation, import, index creation, and the benchmark after ch
 
 Each run retains query-level rankings and these aggregate values:
 
-- Recall@10, MRR@10, nDCG@10, and Hit@10 against the SciFact relevance labels
+- Recall@10, MRR@10, nDCG@10, Hit@10, Hit@5, Hit@1, and Precision@10 against the SciFact relevance labels
 - Atlas client-observed retrieval P50/P95, separately timed Voyage client-rerank P50, and native `$vectorSearch + $rerank` pipeline P50/P95 when selected
-- ANN-to-ENN overlap for the candidate-curve rows
-- run configuration: model, dimensions, index, scalar quantization, fetch size, `numCandidates`, query count, timestamps, source checksum, and embedding API token usage
+- ANN-to-ENN overlap for the candidate-curve and fetch-depth rows
+- run configuration: model, dimensions, index, scalar quantization, fetch size, `numCandidates`, `numDocsToRerank` (reranking rows only), query count, timestamps, source checksum, and embedding API token usage
 
 The timing is client-observed one-user query latency from the benchmark process. The native rerank timer covers the entire aggregation request and does not split Vector Search from reranking. It is not a capacity, concurrency, or end-to-end application-latency claim.
 

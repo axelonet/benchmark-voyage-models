@@ -19,7 +19,9 @@ async function render() {
     for (const variant of data.variants) {
       const m = variant.metrics || {};
       const row = document.createElement("tr");
-      row.innerHTML = `<td title="${variant.timing_scope || ""}">${variant.run_profile || "—"}</td><td><code>${variant.name || "—"}</code></td><td>${variant.family || "—"}</td><td>${variant.dimensions || "—"}</td><td>${variant.quantization || "—"}</td><td>${variant.num_candidates || "—"}</td><td>${fmt(m.recall_at_10)}</td><td>${fmt(m.mrr_at_10)}</td><td>${fmt(m.ndcg_at_10)}</td><td>${fmt(m.retrieval_p50_ms, 1)} / ${fmt(m.retrieval_p95_ms, 1)}</td><td>${fmt(m.native_pipeline_p50_ms, 1)} / ${fmt(m.native_pipeline_p95_ms, 1)}</td><td>${fmt(m.rerank_p50_ms, 1)}</td><td>${fmt(m.total_p50_ms, 1)}</td><td>${fmt(m.ann_enn_overlap_at_10)}</td>`;
+      const failed = variant.status && variant.status !== "complete";
+      if (failed) row.title = `status: ${variant.status}`;
+      row.innerHTML = `<td title="${variant.timing_scope || ""}">${failed ? `⚠ ${variant.status}` : (variant.run_profile || "—")}</td><td><code>${variant.name || "—"}</code></td><td>${variant.model || "—"}</td><td>${variant.family || "—"}</td><td>${variant.dimensions || "—"}</td><td>${variant.quantization || "—"}</td><td>${variant.num_candidates || "—"}</td><td>${variant.fetch_k ?? "—"}</td><td>${variant.num_docs_to_rerank ?? "—"}</td><td>${fmt(m.recall_at_10)}</td><td>${fmt(m.mrr_at_10)}</td><td>${fmt(m.ndcg_at_10)}</td><td>${fmt(m.hit_at_5)}</td><td>${fmt(m.hit_at_1)}</td><td>${fmt(m.precision_at_10)}</td><td>${fmt(m.retrieval_p50_ms, 1)} / ${fmt(m.retrieval_p95_ms, 1)}</td><td>${fmt(m.native_pipeline_p50_ms, 1)} / ${fmt(m.native_pipeline_p95_ms, 1)}</td><td>${fmt(m.rerank_p50_ms, 1)}</td><td>${fmt(m.total_p50_ms, 1)}</td><td>${fmt(m.ann_enn_overlap_at_10)}</td>`;
       body.append(row);
     }
     const comparisonBody = document.querySelector("#comparison-body");

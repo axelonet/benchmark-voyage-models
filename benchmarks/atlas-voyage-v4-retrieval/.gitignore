@@ -8,3 +8,4 @@ results/*.json
 !results/.gitkeep
 web/results.json
 web/results.js
+web/results-*.json

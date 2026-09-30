@@ -129,7 +129,7 @@ def embed_contextualized(client: Any, chunks: list[dict[str, Any]], queries: lis
         usage["document_tokens"] += total_tokens(response)
         usage["document_requests"] += 1
     for batch in batches(queries, 96):
-        response = call_with_retry(lambda: client.contextualized_embed(inputs=[item["query_text"] for item in batch], model=spec["model"], input_type="query", output_dimension=spec["dimensions"], enable_auto_chunking=False))
+        response = call_with_retry(lambda: client.contextualized_embed(inputs=[[item["query_text"]] for item in batch], model=spec["model"], input_type="query", output_dimension=spec["dimensions"], enable_auto_chunking=False))
         values = context_embeddings(response)
         if len(values) != len(batch):
             raise RuntimeError(f"{spec['model']} returned {len(values)} query groups for {len(batch)} queries")

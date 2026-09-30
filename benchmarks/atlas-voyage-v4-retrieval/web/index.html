@@ -72,7 +72,7 @@
           <tr><td>Total P50</td><td>For each query: Atlas retrieval time + rerank time; then calculate the median across the run.</td><td>Still excludes embedding generation and the rest of an application request path.</td></tr>
           <tr><td>ANN–ENN overlap@10</td><td>Top-10 parent documents common to an ANN query and the corresponding exact (`exact: true`) query, divided by the exact top-10 document count.</td><td>Approximate-search agreement with an exact reference. A dash means an exact reference was intentionally not run for that variation.</td></tr>
         </tbody></table></div>
-        <div class="table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Focus</th><th>Dimensions</th><th>Quantization</th><th>numCandidates</th><th>Recall@10</th><th>MRR@10</th><th>nDCG@10</th><th>Atlas P50 / P95 ms</th><th>Native pipeline P50 / P95 ms</th><th>Client rerank P50 ms</th><th>Total P50 ms</th><th>ANN–ENN</th></tr></thead><tbody id="results-body"></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Model</th><th>Focus</th><th>Dimensions</th><th>Quantization</th><th>numCandidates</th><th>Top K</th><th>numDocsToRerank</th><th>Recall@10</th><th>MRR@10</th><th>nDCG@10</th><th>Hit@5</th><th>Hit@1</th><th>Precision@10</th><th>Atlas P50 / P95 ms</th><th>Native pipeline P50 / P95 ms</th><th>Client rerank P50 ms</th><th>Total P50 ms</th><th>ANN–ENN</th></tr></thead><tbody id="results-body"></tbody></table></div>
       </section>
 
       <section id="version-comparison">

@@ -4,13 +4,15 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
-DESTINATION = ROOT / "web" / "results.json"
-SCRIPT_DESTINATION = ROOT / "web" / "results.js"
+WEB = ROOT / "web"
+DESTINATION = WEB / "results.json"
+SCRIPT_DESTINATION = WEB / "results.js"
 
 
 def main() -> None:
@@ -51,10 +53,13 @@ def main() -> None:
                     "run_profile": run.get("profile"),
                     "run_at": run.get("run_at"),
                     "name": name,
+                    "model": item.get("variant", {}).get("model"),
                     "family": item.get("variant", {}).get("family"),
                     "dimensions": item.get("variant", {}).get("dimensions"),
                     "quantization": item.get("variant", {}).get("quantization"),
                     "num_candidates": item.get("variant", {}).get("num_candidates"),
+                    "fetch_k": item.get("variant", {}).get("fetch_k"),
+                    "num_docs_to_rerank": item.get("variant", {}).get("rerank_k"),
                     "status": item.get("status"),
                     "timing_scope": item.get("timing_scope"),
                     "metrics": item.get("metrics", {}),
@@ -94,8 +99,11 @@ def main() -> None:
             }
     DESTINATION.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     SCRIPT_DESTINATION.write_text("window.BENCHMARK_RESULTS = " + json.dumps(payload) + ";\n", encoding="utf-8")
+    archive_destination = WEB / f"results-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    archive_destination.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(f"Wrote {DESTINATION}")
     print(f"Wrote {SCRIPT_DESTINATION}")
+    print(f"Archived {archive_destination}")
 
 
 if __name__ == "__main__":
