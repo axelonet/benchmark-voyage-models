@@ -8,6 +8,7 @@ of treating collStats.totalIndexSize as Vector Search index storage.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from datetime import datetime, timezone
@@ -18,6 +19,10 @@ from pymongo import MongoClient
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS = ROOT / "results"
+DATASETS = {
+    "scifact": {"collection_env": "BENCHMARK_COLLECTION", "collection": "chunks", "prefix": ""},
+    "hrpoc": {"collection_env": "HRPOC_COLLECTION", "collection": "hrpoc_chunks", "prefix": "hrpoc-"},
+}
 
 
 def load_dotenv() -> None:
@@ -36,11 +41,15 @@ def vector_fields(definition: dict) -> list[dict]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", choices=DATASETS, default="scifact", help="which dataset's collection to snapshot")
+    args = parser.parse_args()
+    dataset = DATASETS[args.dataset]
     load_dotenv()
     if not os.getenv("MONGODB_URI"):
         raise SystemExit("Set MONGODB_URI in .env or the shell.")
     database = os.getenv("BENCHMARK_DB", "atlas_voyage_v4_benchmark")
-    collection_name = os.getenv("BENCHMARK_COLLECTION", "chunks")
+    collection_name = os.getenv(dataset["collection_env"], dataset["collection"])
     collection = MongoClient(os.environ["MONGODB_URI"], appname="atlas-voyage-v4-benchmark-index-snapshot")[database][collection_name]
     collection_stats = collection.database.command("collstats", collection_name)
     count = collection_stats.get("count", 0)
@@ -79,7 +88,7 @@ def main() -> None:
         "nominal_float32_payload_note": "A dimensions × 4 × document-count comparison aid only. It is not BSON collection bytes, Atlas Search-index bytes, or a scalar-quantization storage estimate.",
     }
     RESULTS.mkdir(exist_ok=True)
-    destination = RESULTS / f"index-snapshot-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+    destination = RESULTS / f"{dataset['prefix']}index-snapshot-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
     destination.write_text(json.dumps(snapshot, indent=2, default=str) + "\n", encoding="utf-8")
     print(f"Wrote {destination}")
     print(json.dumps({"collection_documents": count, "search_indexes": len(indexes), "ready_indexes": sum(item["status"] == "READY" for item in indexes)}, indent=2))

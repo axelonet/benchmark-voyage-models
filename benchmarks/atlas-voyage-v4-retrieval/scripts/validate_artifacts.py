@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""Validate prepared SciFact documents, labels, and (when present) Voyage vectors."""
+"""Validate prepared documents, labels, and (when present) Voyage vectors."""
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PREPARED = ROOT / "data" / "prepared"
+DATASETS = {
+    "scifact": {"prepared": ROOT / "data" / "prepared", "prepare": "scripts/prepare_scifact.py"},
+    "hrpoc": {"prepared": ROOT / "data" / "prepared-hrpoc", "prepare": "scripts/prepare_hrpoc.py"},
+}
 SPECS = {
     "embedding_voyage_4_large_1024": 1024,
     "embedding_voyage_4_1024": 1024,
@@ -20,9 +24,13 @@ SPECS = {
 
 
 def main() -> None:
-    chunks_path, queries_path, manifest_path = PREPARED / "chunks.ndjson", PREPARED / "queries.json", PREPARED / "manifest.json"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", choices=DATASETS, default="scifact", help="which prepared dataset to validate")
+    args = parser.parse_args()
+    prepared = DATASETS[args.dataset]["prepared"]
+    chunks_path, queries_path, manifest_path = prepared / "chunks.ndjson", prepared / "queries.json", prepared / "manifest.json"
     if not all(path.exists() for path in (chunks_path, queries_path, manifest_path)):
-        raise SystemExit("Run scripts/prepare_scifact.py first.")
+        raise SystemExit(f"Run {DATASETS[args.dataset]['prepare']} first.")
     chunks = [json.loads(line) for line in chunks_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     queries = json.loads(queries_path.read_text(encoding="utf-8"))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -32,10 +40,17 @@ def main() -> None:
         errors.append("No chunks found.")
     if len({chunk.get("chunk_id") for chunk in chunks}) != len(chunks):
         errors.append("Chunk IDs are not unique.")
+    section_ids = {chunk.get("section_id") for chunk in chunks if chunk.get("kind") == "section"}
+    for chunk in chunks:
+        if chunk.get("kind") == "table" and chunk.get("section_id") not in section_ids:
+            errors.append(f"{chunk.get('chunk_id')}: table piece points at a section that is not in the corpus")
     for query in queries:
+        missing_sections = set(query.get("gold_section_ids", [])) - section_ids if section_ids else set()
+        if missing_sections:
+            errors.append(f"{query.get('query_id')}: {len(missing_sections)} gold sections are not in the corpus")
         if not query.get("query_text"):
             errors.append(f"{query.get('query_id')}: missing query text")
-        if not set(query.get("relevance", {})).intersection(parent_ids):
+        if query.get("answerability") != "none" and not set(query.get("relevance", {})).intersection(parent_ids):
             errors.append(f"{query.get('query_id')}: no labelled positive document is present in the corpus")
     if manifest.get("embeddings", {}).get("status") == "generated":
         for chunk in chunks:

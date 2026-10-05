@@ -1,6 +1,6 @@
 # Atlas + Voyage v4 retrieval benchmark
 
-This is a bounded retrieval-quality and query-latency benchmark. It uses the public [BEIR SciFact](https://github.com/beir-cellar/beir) corpus and held-out relevance labels; it does not use synthetic vectors, production data, an Elasticsearch baseline, ACL behaviour, hybrid search, or client-load testing.
+This is a bounded retrieval-quality and query-latency benchmark. It uses the public [BEIR SciFact](https://github.com/beir-cellar/beir) corpus and held-out relevance labels; it does not use synthetic vectors, an Elasticsearch baseline, or client-load testing. Hybrid search and ACL pre-filtering are measured with stated limits (see below), and the client HR-policy dataset is run separately.
 
 The benchmark answers narrowly useful questions:
 
@@ -148,6 +148,40 @@ The timing is client-observed one-user query latency from the benchmark process.
 `scripts/backfill_acl_fields.py` adds two fields to every chunk — `tenant_id` and `effective_principal_ids` — needed by the `hybrid` profile and by `scripts/test_permission_isolation.py`. SciFact has no real permission structure, so the two groups (`group:a`, `group:b`) are assigned synthetically, deterministically, by hashing each chunk's `parent_doc_id`. This validates the ACL pre-filter *mechanism* — that a `$vectorSearch`/`$search` filter on `effective_principal_ids` correctly excludes the other group's documents — not real-world ACL fidelity against any actual permission model.
 
 The `hybrid` profile's own accuracy numbers are filtered by `tenant_id` (a value every chunk shares), not by a specific group, so the synthetic ACL assignment does not affect its Recall/MRR/nDCG. Group-level isolation is checked exclusively by `test_permission_isolation.py`, which queries as each synthetic group in turn and fails if either group ever receives a document belonging to the other.
+
+## Client HR-policy dataset (`hrpoc`)
+
+A second, separate dataset: the client POC package (2,277 policy documents, 26,800 sections, 1,996 labelled queries, 140 audience definitions). It does not replace SciFact: it has its own prepared directory (`data/prepared-hrpoc/`), collection (`hrpoc_chunks`, override with `HRPOC_COLLECTION`), and result files (`results/hrpoc-*.json`), so no SciFact artifact is read or written.
+
+Differences from SciFact that change what the numbers mean:
+
+- The unit is a section, not a word-window chunk of a paper. Nothing is truncated locally and empty sections are kept (`--drop-empty` removes them). Table-to-text sentences from `table_hash.json` are indexed as extra pieces (`kind: "table"`), one per table and owning section via `table_sections.json`, so a table in both the .pdf and .docx copy is indexed under both. Retrieval therefore returns sections and table pieces; `run_benchmark.py` keeps each section once at its best rank, which can leave fewer than 50 sections. 43 table-section links with no sentences are skipped.
+- Access control is real, not synthetic. `prepare_hrpoc.py` evaluates the 140 audience rule trees against each query's `user_params` and stores `open` / `audience_ids` on each chunk. All 1,996 queries come from one test user, so this checks that restricted documents are excluded for that user; it cannot show cross-user leakage.
+- Results list 50 sections. Scoring is the client's: Doc Hit@1/5/10 and Passage Hit@5/10 over the first N sections, on answerable queries only, plus a language and cross-lingual breakdown and a separate top-score summary for the 166 unanswerable queries. Recall/MRR/nDCG@10 are also reported, on deduplicated documents.
+- Embedding is billable, so it is a separate step. `--dataset hrpoc` passes `truncation=True` to Voyage so one over-long section cannot fail a whole batch.
+
+```bash
+# Package is expected in data/source/hrpoc/ (gitignored); sizes and hashes are checked against MANIFEST.json.
+python3 scripts/prepare_hrpoc.py                       # offline, no API calls
+.venv/bin/python scripts/embed_voyage.py --dataset hrpoc   # billable; saves progress per representation
+.venv/bin/python scripts/validate_artifacts.py --dataset hrpoc
+
+set -a; . ./.env; set +a
+mongoimport --uri "$MONGODB_URI" --db "$BENCHMARK_DB" --collection "${HRPOC_COLLECTION:-hrpoc_chunks}" \
+  --file data/prepared-hrpoc/chunks.ndjson --type json --drop   # drops only the hrpoc collection
+
+.venv/bin/python scripts/create_indexes.py --dataset hrpoc --wait
+.venv/bin/python scripts/run_benchmark.py --dataset hrpoc --profile standard   # also: rerank, native-rerank, hybrid
+.venv/bin/python scripts/run_benchmark.py --dataset hrpoc --profile rerank 
+.venv/bin/python scripts/run_benchmark.py --dataset hrpoc --profile native-reran 
+.venv/bin/python scripts/run_benchmark.py --dataset hrpoc --profile hybrid 
+.venv/bin/python scripts/test_permission_isolation.py --dataset hrpoc
+.venv/bin/python scripts/collect_index_snapshot.py --dataset hrpoc
+.venv/bin/python scripts/build_dashboard_data.py
+python3 -m http.server --directory web 8000 # Then open http://localhost:8000 in a browser.
+```
+
+`test_permission_isolation.py --dataset hrpoc` checks, per query, that the audience-filtered search returns no document the asker may not see, that a no-audience control returns only open documents, and that the unfiltered search would have returned a hidden document for at least one query. Without that last condition a pass proves nothing, so the run is reported as inconclusive instead.
 
 ## Vector Search index evidence
 

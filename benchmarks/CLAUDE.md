@@ -29,9 +29,10 @@ If a second benchmark is added under `benchmarks/`, it should follow the same sp
         ├── data/
         │   ├── source/      (gitignored — downloaded corpus)
         │   ├── prepared/    (gitignored — generated chunks/embeddings)
+        │   ├── prepared-hrpoc/ (gitignored — client HR-policy dataset, generated; source under data/source/hrpoc/)
         │   └── snapshots/   (checked in — starter embedding tar parts)
         ├── results/         (gitignored except .gitkeep — generated run artifacts)
-        ├── scripts/         (11 standalone Python scripts)
+        ├── scripts/         (12 standalone Python scripts)
         └── web/             (static results dashboard)
 ```
 
@@ -77,6 +78,8 @@ There is **no single source of truth** for the retrieval-variant schema in `benc
 - `scripts/embed_voyage.py`'s hardcoded `SPECS` list
 - `scripts/validate_artifacts.py`'s hardcoded `SPECS` dict — a separate `field_name -> dimension` mapping used only to validate chunk/query vector shapes; it must gain the same new entry whenever `embed_voyage.py`'s `SPECS` gains one, even though the two are never read from the same place.
 - `scripts/run_benchmark.py`'s `select_variants()` — its hardcoded `rerank_variant_names` set must list the exact same variant names present in `config/variants.json` for any variant meant to run under the `rerank`/`native-rerank` profiles. Unlike the schema files above, this one isn't about model/dimension/index shape — it's a name-based selection list, so it also breaks on a plain **rename** of an existing variant, not just on adding or removing one. Its sibling `rerank_only_families` set (used to exclude rerank-only families from the `standard` profile) has the same failure mode in reverse: a new family meant only for reranking that isn't added there will leak into `standard` as a duplicate.
+
+The client HR-policy dataset (`--dataset hrpoc`) reuses the same `variants.json`, `SPECS`, and `rerank_variant_names`; it differs only by dataset. The `DATASETS` dicts in `embed_voyage.py`, `validate_artifacts.py`, `create_indexes.py`, and `run_benchmark.py` (and the `--dataset` handling in `test_permission_isolation.py`) are separate hand-kept copies and must agree on directory names (`data/prepared-hrpoc`), collection (`hrpoc_chunks`, env `HRPOC_COLLECTION`), and the `hrpoc-` results prefix read by `build_dashboard_data.py`. `run_benchmark.py`'s `index_overrides` maps the SciFact-only `vs_voyage_4_1024_acl` to `vs_voyage_4_1024` for hrpoc, so renaming either index breaks hybrid runs there.
 
 Before considering any change to the retrieval pipeline complete, explicitly diff these five for field-name, count, dimension, and name consistency (e.g. embedding field names like `embedding_voyage_4_1024` must match exactly across both `SPECS` lists and `INDEXES`; variant names referenced in `rerank_variant_names` must exist verbatim in `config/variants.json`). Do not assume changing one file is sufficient.
 

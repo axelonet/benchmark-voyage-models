@@ -29,6 +29,13 @@ ACL_FILTER_FIELDS = ("tenant_id", "effective_principal_ids")
 ACL_VECTOR_INDEX = ("vs_voyage_4_1024_acl", "embedding_voyage_4_1024", 1024, None)
 # BM25 text index used by the native $rankFusion hybrid profile.
 HYBRID_TEXT_INDEX = "search_text_bm25"
+# hrpoc: every query is audience pre-filtered, so each vector index declares the filter fields itself
+# (no separate _acl index) and the BM25 index carries the same fields. open is boolean, audience_ids a token array.
+HRPOC_FILTER_FIELDS = {"open": "boolean", "audience_ids": "token"}
+DATASETS = {
+    "scifact": {"collection_env": "BENCHMARK_COLLECTION", "collection": "chunks"},
+    "hrpoc": {"collection_env": "HRPOC_COLLECTION", "collection": "hrpoc_chunks"},
+}
 
 
 def load_dotenv() -> None:
@@ -51,34 +58,39 @@ def definition(path: str, dimensions: int, quantization: str | None, filters: tu
     return {"fields": [field] + [{"type": "filter", "path": name} for name in filters]}
 
 
-def text_definition(filters: tuple[str, ...]) -> dict:
+def text_definition(filters: dict[str, str]) -> dict:
     mappings = {"dynamic": False, "fields": {"text": {"type": "string"}}}
-    for name in filters:
-        mappings["fields"][name] = {"type": "token"}
+    for name, field_type in filters.items():
+        mappings["fields"][name] = {"type": field_type}
     return {"mappings": mappings}
 
 
-def index_specs() -> list[tuple[str, str, dict]]:
+def index_specs(dataset: str = "scifact") -> list[tuple[str, str, dict]]:
+    if dataset == "hrpoc":
+        specs = [(name, "vectorSearch", definition(field, dimensions, quantization, filters=tuple(HRPOC_FILTER_FIELDS))) for name, field, dimensions, quantization in INDEXES]
+        specs.append((HYBRID_TEXT_INDEX, "search", text_definition(HRPOC_FILTER_FIELDS)))
+        return specs
     specs = [(name, "vectorSearch", definition(field, dimensions, quantization)) for name, field, dimensions, quantization in INDEXES]
     acl_name, acl_field, acl_dimensions, acl_quantization = ACL_VECTOR_INDEX
     specs.append((acl_name, "vectorSearch", definition(acl_field, acl_dimensions, acl_quantization, filters=ACL_FILTER_FIELDS)))
-    specs.append((HYBRID_TEXT_INDEX, "search", text_definition(ACL_FILTER_FIELDS)))
+    specs.append((HYBRID_TEXT_INDEX, "search", text_definition({name: "token" for name in ACL_FILTER_FIELDS})))
     return specs
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", choices=DATASETS, default="scifact", help="which dataset's collection and index definitions to create")
     parser.add_argument("--wait", action="store_true", help="wait up to ten minutes for every requested index to become queryable")
-    parser.add_argument("--replace", action="store_true", help="replace only the nine named benchmark indexes")
+    parser.add_argument("--replace", action="store_true", help="replace only the named benchmark indexes for the selected dataset")
     args = parser.parse_args()
     load_dotenv()
     if not os.getenv("MONGODB_URI"):
         raise SystemExit("Set MONGODB_URI in .env or the shell.")
     database = os.getenv("BENCHMARK_DB", "atlas_voyage_v4_benchmark")
-    collection_name = os.getenv("BENCHMARK_COLLECTION", "chunks")
+    collection_name = os.getenv(DATASETS[args.dataset]["collection_env"], DATASETS[args.dataset]["collection"])
     collection = MongoClient(os.environ["MONGODB_URI"], appname="atlas-voyage-v4-benchmark")[database][collection_name]
     existing = {item["name"]: item for item in collection.list_search_indexes()}
-    specs = index_specs()
+    specs = index_specs(args.dataset)
     for name, kind, index_definition in specs:
         if name in existing:
             if not args.replace:
