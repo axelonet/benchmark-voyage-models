@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.claude/
 
 # Python environments and caches
 .venv/
@@ -11,6 +12,7 @@ __pycache__/
 # Downloaded benchmark data and generated results
 **/data/source/
 **/data/prepared/
+**/data/prepared-hrpoc/
 **/results/*.json
 !**/results/.gitkeep
 **/web/results.json

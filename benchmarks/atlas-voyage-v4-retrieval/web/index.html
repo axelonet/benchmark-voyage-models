@@ -11,8 +11,8 @@
       <header class="hero">
         <p class="eyebrow">REPRODUCIBLE RETRIEVAL BENCHMARK</p>
         <h1>Atlas Vector Search with Voyage v4</h1>
-        <p class="lede">A bounded experiment on real scientific claims and held-out relevance labels. It is designed to expose the quality, latency, and storage trade-offs inside the retrieval stack—not to recreate a production system or compare against Elasticsearch.</p>
-        <div class="scope"><span>1,000 source papers</span><span>80 labelled queries</span><span>2,047 chunks</span><span>Atlas M30 Gen 2 · AWS</span><span>2 × dedicated S30 Search Nodes</span><span>serial execution</span></div>
+        <p class="lede">A bounded experiment on real scientific claims and held-out relevance labels (BEIR SciFact), repeated on the client's HR-policy corpus in a separate section below. It is designed to expose the quality, latency, and storage trade-offs inside the retrieval stack—not to recreate a production system or compare against Elasticsearch.</p>
+        <div class="scope"><span id="scope-scifact">SciFact: loading…</span><span id="scope-hrpoc" hidden></span><span>Atlas M30 Gen 2 · AWS</span><span>2 × dedicated S30 Search Nodes</span><span>serial execution</span></div>
       </header>
 
       <section class="decision">
@@ -54,13 +54,16 @@
         </div>
         <aside>
           <p class="tag">BOUNDARY</p>
-          <p>This deliberately does not answer application end-to-end latency, concurrent capacity, ACL correctness, hybrid retrieval, or performance at millions of vectors. Those need a later workload-specific benchmark.</p>
+          <p>This does not answer application end-to-end latency, concurrent capacity, or performance at millions of vectors. Hybrid retrieval and ACL pre-filtering are measured, with limits: the SciFact ACL groups are synthetic (assigned by hashing the document id), and the client dataset uses real audience rules but a single test user, so it cannot show leakage between users. A later workload-specific benchmark is needed for the rest.</p>
         </aside>
       </section>
 
       <section id="latest-results">
-        <p class="eyebrow">LATEST LOCAL RUN</p>
-        <h2>Measured results</h2>
+        <p class="eyebrow">LATEST LOCAL RUN · SCIFACT</p>
+        <div class="section-title-row">
+          <h2>Measured results</h2>
+          <button id="expand-results" class="expand-btn" type="button" aria-expanded="false" aria-controls="results-table-wrap">⤢ Expand</button>
+        </div>
         <p id="run-summary" class="muted">Loading local result data…</p>
         <div class="table-wrap metric-table"><table><thead><tr><th>Metric</th><th>How it is calculated</th><th>What it does and does not represent</th></tr></thead><tbody>
           <tr><td>Recall@10</td><td>For each labelled query: relevant parent documents retrieved in the top 10 ÷ all labelled relevant parent documents. The page shows the mean across completed queries.</td><td>Whether relevant material was found. Chunks are deduplicated to parent documents before scoring.</td></tr>
@@ -72,7 +75,39 @@
           <tr><td>Total P50</td><td>For each query: Atlas retrieval time + rerank time; then calculate the median across the run.</td><td>Still excludes embedding generation and the rest of an application request path.</td></tr>
           <tr><td>ANN–ENN overlap@10</td><td>Top-10 parent documents common to an ANN query and the corresponding exact (`exact: true`) query, divided by the exact top-10 document count.</td><td>Approximate-search agreement with an exact reference. A dash means an exact reference was intentionally not run for that variation.</td></tr>
         </tbody></table></div>
-        <div class="table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Model</th><th>Focus</th><th>Dimensions</th><th>Quantization</th><th>numCandidates</th><th>Top K</th><th>numDocsToRerank</th><th>Recall@10</th><th>MRR@10</th><th>nDCG@10</th><th>Hit@5</th><th>Hit@1</th><th>Precision@10</th><th>Atlas P50 / P95 ms</th><th>Native pipeline P50 / P95 ms</th><th>Client rerank P50 ms</th><th>Total P50 ms</th><th>ANN–ENN</th></tr></thead><tbody id="results-body"></tbody></table></div>
+        <div class="table-wrap" id="results-table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Model</th><th>Focus</th><th>Dimensions</th><th>Quantization</th><th>numCandidates</th><th>Top K</th><th>numDocsToRerank</th><th>Recall@10</th><th>MRR@10</th><th>nDCG@10</th><th>Hit@5</th><th>Hit@1</th><th>Precision@10</th><th>Atlas P50 / P95 ms</th><th>Native pipeline P50 / P95 ms</th><th>Client rerank P50 ms</th><th>Total P50 ms</th><th>ANN–ENN</th></tr></thead><tbody id="results-body"></tbody></table></div>
+      </section>
+
+      <section id="hybrid-results">
+        <p class="eyebrow">NATIVE HYBRID SEARCH</p>
+        <h2><code>$rankFusion</code> — vector + BM25</h2>
+        <p id="hybrid-summary" class="muted">Loading hybrid-search results…</p>
+        <p class="muted">Timer starts immediately before one aggregation containing native <code>$rankFusion</code> (a <code>$vectorSearch</code> pipeline combined with a <code>$search</code> BM25 pipeline) and stops after the top 10 rows return; it cannot split the vector component from the BM25 component. Every row also applies the ACL pre-filter — see Permission isolation below for what that filter is validated against.</p>
+        <div class="table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Model</th><th>Vector weight</th><th>Text weight</th><th>Recall@10</th><th>MRR@10</th><th>nDCG@10</th><th>Hit@5</th><th>Hit@1</th><th>Precision@10</th><th>Hybrid pipeline P50 / P95 ms</th></tr></thead><tbody id="hybrid-body"></tbody></table></div>
+      </section>
+
+      <section id="permission-isolation">
+        <p class="eyebrow">ACL PRE-FILTER</p>
+        <h2>Permission isolation</h2>
+        <p id="isolation-summary" class="muted">Loading permission-isolation results…</p>
+        <div class="table-wrap"><table><thead><tr><th>Query</th><th>Queried as</th><th>Leaked parent documents</th></tr></thead><tbody id="isolation-body"></tbody></table></div>
+      </section>
+
+      <section id="hrpoc-results">
+        <p class="eyebrow">CLIENT HR-POLICY DATASET</p>
+        <h2>Section-level retrieval on the client POC corpus</h2>
+        <p id="hrpoc-summary" class="muted">Loading client-dataset results…</p>
+        <p class="muted">Separate from the SciFact rows above. Every query is pre-filtered to the documents its asker may see. Doc Hit@N: a returned section belongs to a gold document within the first N sections; Passage Hit@N: a returned section is a gold section, scored only on queries that have gold sections. Table-to-text sentences are indexed as extra pieces of the section that holds each table, and a result list holds each section once, at the rank of its best piece, so it can contain fewer than 50 sections. Scored on answerable queries; unanswerable queries are reported separately. Recall, MRR and nDCG@10 are computed on documents after deduplicating sections.</p>
+        <div class="table-wrap"><table><thead><tr><th>Run</th><th>Variant</th><th>Model</th><th>Doc Hit@1</th><th>Doc Hit@5</th><th>Doc Hit@10</th><th>Passage Hit@5</th><th>Passage Hit@10</th><th>Recall@10</th><th>MRR@10</th><th>nDCG@10</th><th>Observed P50 / P95 ms</th></tr></thead><tbody id="hrpoc-body"></tbody></table></div>
+        <h3>Breakdown for one variant</h3>
+        <p class="muted"><label>Variant <select id="hrpoc-variant"></select></label></p>
+        <div class="table-wrap"><table><thead><tr><th>Group</th><th>Queries</th><th>Doc Hit@1</th><th>Doc Hit@5</th><th>Doc Hit@10</th><th>Passage Hit@5</th><th>Passage Hit@10</th></tr></thead><tbody id="hrpoc-breakdown-body"></tbody></table></div>
+        <p id="hrpoc-unanswerable" class="muted"></p>
+        <h3>Index configuration</h3>
+        <p id="hrpoc-index-summary" class="muted">No index snapshot has been published for this dataset yet.</p>
+        <div class="table-wrap"><table><thead><tr><th>Index</th><th>Status</th><th>Vector field</th><th>Dimensions</th><th>Quantization</th><th>Nominal float32 payload</th></tr></thead><tbody id="hrpoc-index-body"></tbody></table></div>
+        <h3>Audience pre-filter check</h3>
+        <p id="hrpoc-isolation" class="muted">No audience-isolation run has been published yet.</p>
       </section>
 
       <section id="version-comparison">
@@ -83,14 +118,14 @@
       </section>
 
       <section id="index-evidence">
-        <p class="eyebrow">VECTOR SEARCH INDEX SNAPSHOT</p>
+        <p class="eyebrow">VECTOR SEARCH INDEX SNAPSHOT · SCIFACT</p>
         <h2>Index configuration and observed footprint</h2>
         <p id="index-summary" class="muted">Loading index snapshot…</p>
         <div class="table-wrap"><table><thead><tr><th>Index</th><th>Status</th><th>Vector field</th><th>Dimensions</th><th>Quantization</th><th>Atlas UI Total Size</th><th>Atlas UI Recommended Memory</th><th>Nominal float32 payload</th></tr></thead><tbody id="index-body"></tbody></table></div>
         <p id="index-note" class="muted"></p>
       </section>
 
-      <footer>Dataset: BEIR SciFact · Model references: Voyage AI documentation · Results are local, reproducible run artifacts.</footer>
+      <footer>Datasets: BEIR SciFact and the client HR-policy POC package · Model references: Voyage AI documentation · Results are local, reproducible run artifacts.</footer>
     </main>
     <script src="results.js"></script>
     <script src="app.js"></script>
